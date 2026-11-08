@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#000000" />
+<title>四象限</title>
+
+<!-- ===== PWA：添加到主屏幕后像原生 APP ===== -->
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="四象限" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="application-name" content="四象限" />
+
+<!-- Tailwind Play CDN（需联网；下方有内联兜底样式） -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink:  '#1C1C1E',
+          ink2: '#2C2C2E',
+          accent: '#FF9500',
+          done: '#30D158',
+        },
+        fontFamily: {
+          sans: ['-apple-system','BlinkMacSystemFont','SF Pro Text','Segoe UI',
+                 'PingFang SC','Hiragino Sans GB','Microsoft YaHei','sans-serif'],
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  /* ---------- 兜底：Tailwind 未加载时也不至于白底 ---------- */
+  html, body { background: #000; color: #fff; }
+  body { -webkit-tap-highlight-color: transparent; }
+
+  /* ---------- 全局细节 ---------- */
+  * { -webkit-font-smoothing: antialiased; }
+  /* 数字等宽，营造数据感 */
+  .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+  /* 隐藏滚动条但保留滚动 */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  /* 日期控件适配暗色 */
+  input[type="date"] { color-scheme: dark; }
+  input, textarea, button { font-family: inherit; }
+  /* 去掉 iOS 输入框内阴影 */
+  input, textarea { -webkit-appearance: none; }
+
+  /* ---------- 半圆仪表盘 ---------- */
+  /* 进度用 mask 遮罩控制显示范围，分段则由 stroke-dasharray 负责 */
+  #gaugeFill {
+    transition: width .7s cubic-bezier(.34, .9, .3, 1);
+  }
+
+  /* ---------- 任务行：备注默认折叠，点击展开 ---------- */
+  .t-note { display: none; }
+  .task-row.expanded .t-note { display: block; }
+  .task-row.expanded .t-title { white-space: normal; }
+
+  /* ---------- 底部面板 ---------- */
+  #modal {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .26s ease;
+  }
+  #modal.open { opacity: 1; pointer-events: auto; }
+  #sheet {
+    transform: translateY(100%);
+    transition: transform .36s cubic-bezier(.32,.72,0,1);
+  }
+  #modal.open #sheet { transform: translateY(0); }
+
+  /* ---------- Toast ---------- */
+  #toast {
+    position: fixed; left: 50%; bottom: 104px;
+    transform: translate(-50%, 10px);
+    opacity: 0; pointer-events: none; z-index: 80;
+    transition: opacity .24s ease, transform .24s ease;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* ---------- 按压反馈 ---------- */
+  .press { transition: transform .12s ease, opacity .12s ease; }
+  .press:active { transform: scale(.96); opacity: .85; }
+
+  /* ---------- 进入动画 ---------- */
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .rise { animation: rise .26s ease both; }
+</style>
+</head>
+
+<body class="bg-black text-white font-sans min-h-screen">
+
+<!-- ============ 主体 ============ -->
+<main class="max-w-lg mx-auto px-5 pt-10 pb-32">
+
+  <!-- ---------- 顶部数据面板 ---------- -->
+  <header>
+    <div class="flex items-start justify-between">
+      <div>
+        <p id="todayLabel" class="text-[10.5px] tracking-[0.22em] text-gray-500 font-semibold uppercase">
+          LOADING
+        </p>
+        <h1 id="viewTitle" class="text-[27px] font-semibold tracking-tight mt-1.5">四象限</h1>
+      </div>
+
+      <!-- 半圆仪表盘：今日完成度 -->
+      <div id="ringBox" class="relative w-[118px] h-[78px] -mt-1 shrink-0">
+        <svg class="w-full h-full" viewBox="0 0 100 66" aria-hidden="true">
+          <defs>
+            <!-- 遮罩：宽度随完成率增长，实现“从左向右点亮” -->
+            <mask id="gaugeMask" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="66">
+              <rect id="gaugeFill" x="0" y="0" width="0" height="66" fill="#ffffff" />
+            </mask>
+          </defs>
+
+          <!-- 底层轨道：深灰 + 分段刻度 -->
+          <path d="M10 55 A40 40 0 0 1 90 55"
+                fill="none" stroke="#333333"
+                stroke-width="8" stroke-linecap="round"
+                stroke-dasharray="4 2.5" />
+
+          <!-- 进度层：同款分段，由 mask 控制露出比例 -->
+          <path d="M10 55 A40 40 0 0 1 90 55"
+                fill="none" stroke="#FF9500"
+                stroke-width="8" stroke-linecap="round"
+                stroke-dasharray="4 2.5"
+                mask="url(#gaugeMask)" />
+        </svg>
+
+        <!-- 圆心文字 -->
+        <div class="absolute inset-x-0 bottom-0 flex flex-col items-center">
+          <span id="ringText" class="text-3xl font-bold tabular tracking-tight leading-none">0%</span>
+          <span class="text-[9.5px] text-gray-500 mt-1 font-medium tracking-wide">完成率</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 三个核心数字（整体居中） -->
+    <div id="headerStats" class="flex justify-center items-start gap-20 mt-7">
+      <div class="text-center">
+        <span id="statOpen" class="block text-[40px] leading-none font-bold tabular tracking-tight text-red-600">0</span>
+        <p class="text-[11px] text-gray-500 mt-2.5 font-medium">今日待办</p>
+      </div>
+      <div class="text-center">
+        <span id="statDone" class="block text-[40px] leading-none font-bold tabular tracking-tight text-purple-500">0</span>
+        <p class="text-[11px] text-gray-500 mt-2.5 font-medium">已完成</p>
+      </div>
+      <div class="text-center">
+        <span id="statOverdue" class="block text-[40px] leading-none font-bold tabular tracking-tight text-orange-500">0</span>
+        <p class="text-[11px] text-gray-500 mt-2.5 font-medium">已逾期</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ---------- 任务列表 ---------- -->
+  <section data-view="quadrants" class="mt-9">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-[15px] font-semibold tracking-tight">任务</h2>
+
+      <!-- 显示已完成开关 -->
+      <button id="doneToggle" class="flex items-center gap-2 press" aria-pressed="true">
+        <span class="text-[11.5px] text-gray-500">显示已完成</span>
+        <span id="doneTrack" class="relative w-9 h-[21px] rounded-full bg-[#2C2C2E] transition-colors duration-200">
+          <span id="doneKnob"
+                class="absolute top-[2.5px] left-[2.5px] w-4 h-4 rounded-full bg-[#8E8E93]
+                       transition-all duration-200"></span>
+        </span>
+      </button>
+    </div>
+
+    <!-- 四象限由 JS 渲染 -->
+    <div id="quadrants" class="space-y-3"></div>
+  </section>
+
+  <!-- ---------- 日历视图 ---------- -->
+  <section data-view="calendar" class="mt-8 hidden">
+    <!-- 月份切换 -->
+    <div class="flex items-center justify-between mb-4">
+      <button id="calPrev" class="w-9 h-9 rounded-full flex items-center justify-center
+                                 text-gray-400 active:text-white press" aria-label="上个月">
+        <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 5l-7 7 7 7" />
+        </svg>
+      </button>
+
+      <span id="calTitle" class="text-[15px] font-semibold tabular">2026 年 11 月</span>
+
+      <button id="calNext" class="w-9 h-9 rounded-full flex items-center justify-center
+                                 text-gray-400 active:text-white press" aria-label="下个月">
+        <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- 星期头 -->
+    <div id="calWeekdays" class="grid grid-cols-7 mb-1"></div>
+
+    <!-- 日期格子 -->
+    <div id="calGrid" class="grid grid-cols-7 gap-y-1"></div>
+
+    <!-- 选中日期的任务 -->
+    <div class="mt-7">
+      <h3 id="calDayTitle" class="text-[13px] font-semibold text-gray-400 mb-3"></h3>
+      <div id="calTasks" class="space-y-2"></div>
+    </div>
+  </section>
+
+  <!-- ---------- 统计视图 ---------- -->
+  <section data-view="stats" class="mt-8 hidden">
+    <div id="statsBody"></div>
+  </section>
+</main>
+
+<!-- ============ 悬浮添加按钮 ============ -->
+<button id="openAdd"
+        class="fixed z-40 right-5 bottom-[88px] w-[56px] h-[56px] rounded-full
+               bg-accent text-black flex items-center justify-center press
+               shadow-[0_10px_30px_-6px_rgba(255,149,0,0.55)]"
+        aria-label="新建任务">
+  <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2.4" stroke-linecap="round">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+</button>
+
+<!-- ============ 底部导航 ============ -->
+<nav class="fixed bottom-0 inset-x-0 z-30">
+  <div class="bg-black/[0.85] backdrop-blur-xl border-t border-white/[0.06]">
+    <div class="max-w-lg mx-auto grid grid-cols-3 h-[58px]"
+         style="padding-bottom: env(safe-area-inset-bottom);">
+
+      <!-- 四象限（当前） -->
+      <button class="flex flex-col items-center justify-center gap-1.5 text-white" data-nav="quadrants">
+        <svg class="w-[21px] h-[21px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linejoin="round">
+          <rect x="3.5" y="3.5" width="7" height="7" rx="1.6" />
+          <rect x="13.5" y="3.5" width="7" height="7" rx="1.6" />
+          <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" />
+          <rect x="13.5" y="13.5" width="7" height="7" rx="1.6" />
+        </svg>
+        <span class="text-[10px] font-semibold">四象限</span>
+      </button>
+
+      <!-- 日历 -->
+      <button class="flex flex-col items-center justify-center gap-1.5 text-[#4A4A4E]" data-nav="calendar">
+        <svg class="w-[21px] h-[21px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.5" y="5" width="17" height="15.5" rx="2.4" />
+          <path d="M8 2.8v4M16 2.8v4M3.5 10h17" />
+        </svg>
+        <span class="text-[10px] font-medium">日历</span>
+      </button>
+
+      <!-- 统计 -->
+      <button class="flex flex-col items-center justify-center gap-1.5 text-[#4A4A4E]" data-nav="stats">
+        <svg class="w-[21px] h-[21px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 20v-5M12 20V6M18 20v-9" />
+        </svg>
+        <span class="text-[10px] font-medium">统计</span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ 新建 / 编辑 面板 ============ -->
+<div id="modal" class="fixed inset-0 z-50">
+  <div id="scrim" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+
+  <div id="sheet"
+       class="absolute inset-x-0 bottom-0 max-w-lg mx-auto bg-ink rounded-t-[26px]
+              px-5 pt-3 pb-5"
+       style="padding-bottom: max(1.25rem, env(safe-area-inset-bottom));">
+
+    <!-- 把手 -->
+    <div class="w-9 h-1 rounded-full bg-[#3A3A3C] mx-auto mb-5"></div>
+
+    <h2 id="sheetTitle" class="text-[17px] font-semibold mb-4">新建任务</h2>
+
+    <!-- 标题 -->
+    <input id="fTitle" type="text" maxlength="60" placeholder="要做什么？"
+           class="w-full bg-ink2 rounded-xl px-4 py-3.5 text-[15px] text-white
+                  placeholder:text-gray-600 border-0 outline-none
+                  focus:ring-1 focus:ring-accent/50 transition" />
+
+    <!-- 备注 -->
+    <textarea id="fNote" maxlength="200" rows="2" placeholder="备注（可选）"
+              class="w-full bg-ink2 rounded-xl px-4 py-3 text-[14px] text-white
+                     placeholder:text-gray-600 border-0 outline-none resize-none mt-2.5
+                     focus:ring-1 focus:ring-accent/50 transition"></textarea>
+
+    <!-- 截止日期 -->
+    <div class="mt-2.5">
+      <label for="fDue" class="block text-[11px] text-gray-500 font-medium mb-1.5 px-1">
+        截止日期（可选）
+      </label>
+      <input id="fDue" type="date"
+             class="w-full bg-ink2 rounded-xl px-4 py-3 text-[14px] text-gray-300
+                    border-0 outline-none focus:ring-1 focus:ring-accent/50 transition" />
+    </div>
+
+    <!-- 重要 / 紧急 -->
+    <div class="grid grid-cols-2 gap-2.5 mt-3">
+      <button id="fImp" data-flag="imp"
+              class="h-11 rounded-xl text-[13.5px] font-semibold transition-colors duration-150
+                     bg-ink2 text-gray-400">重要</button>
+      <button id="fUrg" data-flag="urg"
+              class="h-11 rounded-xl text-[13.5px] font-semibold transition-colors duration-150
+                     bg-ink2 text-gray-400">紧急</button>
+    </div>
+
+    <p id="sheetHint" class="text-[12px] text-orange-500 mt-3 min-h-[16px]"></p>
+
+    <!-- 操作 -->
+    <div class="flex gap-2.5 mt-1">
+      <button id="sheetCancel"
+              class="flex-1 h-12 rounded-xl bg-ink2 text-[15px] font-medium text-gray-300 press">
+        取消
+      </button>
+      <button id="sheetSave"
+              class="flex-[1.6] h-12 rounded-xl bg-white text-black text-[15px] font-semibold press">
+        保存
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Toast ============ -->
+<div id="toast"
+     class="px-4 py-2.5 rounded-full bg-ink2/95 backdrop-blur text-[12.5px] text-gray-200
+            whitespace-nowrap shadow-lg">
+</div>
+
+<script>
+/* =========================================================
+ * 四象限待办 · 暗黑版
+ * 结构：state → storage → render → actions
+ * 功能逻辑与原版完全一致，仅替换视图层
+ * ========================================================= */
+
+/* ---------- 常量 ---------- */
+const STORAGE_KEY = "quadrant_todo_v1";
+
+const QUADRANTS = [
+  { key: "Q1", name: "重要且紧急", sub: "立即去做",
+    accent: "text-orange-500", badge: "text-orange-500",
+    empty: "先放最要紧的进来" },
+  { key: "Q2", name: "重要不紧急", sub: "计划去做",
+    accent: "text-green-500", badge: "text-green-500",
+    empty: "别只顾救火，规划一下" },
+  { key: "Q3", name: "紧急不重要", sub: "快速处理",
+    accent: "text-pink-500", badge: "text-pink-500",
+    empty: "暂时没有琐事追你" },
+  { key: "Q4", name: "不重要不紧急", sub: "有空再说",
+    accent: "text-gray-500", badge: "text-gray-500",
+    empty: "偷个懒也没关系" },
+];
+
+// 象限图标（线性 SVG 路径）
+const QICON = {
+  Q1: '<path d="M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5z"/>',
+  Q2: '<circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
+  Q3: '<path d="M18 8.4a6 6 0 1 0-12 0c0 6.6-2.6 8.4-2.6 8.4h17.2S18 15 18 8.4"/><path d="M13.7 20.6a2 2 0 0 1-3.4 0"/>',
+  Q4: '<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>',
+};
+
+// 逾期基准：页面加载时取一次本地日期
+const TODAY_SNAPSHOT = (() => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+})();
+
+/* ---------- state ---------- */
+let tasks = [];
+let showDone = true;
+let sheetMode = "add";   // add | edit
+let editingId = null;
+let flagImp = false;     // 面板内的临时状态
+let flagUrg = false;
+
+// 视图状态
+let currentView = "quadrants";        // quadrants | calendar | stats
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let calSelected = TODAY_SNAPSHOT;     // 日历里选中的日期
+
+/* ---------- 工具 ---------- */
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// 重要 / 紧急 → 象限（唯一真源）
+function quadOf(t) {
+  if (t.important && t.urgent) return "Q1";
+  if (t.important && !t.urgent) return "Q2";
+  if (!t.important && t.urgent) return "Q3";
+  return "Q4";
+}
+
+function isOverdue(t) {
+  return !t.done && !!t.dueDate && t.dueDate < TODAY_SNAPSHOT;
+}
+
+function isDoneToday(t) {
+  if (!t.done || !t.completedAt) return false;
+  const d = new Date(t.completedAt);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` === TODAY_SNAPSHOT;
+}
+
+/* ---------- storage ---------- */
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) { tasks = []; return; }
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.tasks)) { tasks = []; return; }
+    tasks = data.tasks.map((t) => ({
+      id: String(t.id || genId()),
+      title: String(t.title || "").slice(0, 60),
+      note: String(t.note || "").slice(0, 200),
+      important: !!t.important,
+      urgent: !!t.urgent,
+      done: !!t.done,
+      dueDate: typeof t.dueDate === "string" ? t.dueDate : "",
+      createdAt: Number(t.createdAt) || Date.now(),
+      completedAt: t.completedAt ? Number(t.completedAt) : null,
+    }));
+  } catch (e) {
+    tasks = [];
+    setTimeout(() => toast("本地数据损坏，已重置"), 300);
+  }
+}
+
+function save() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, tasks }));
+  } catch (e) { /* 隐私模式或写满：静默失败 */ }
+}
+
+// 检测本地存储是否真的可写（某些手机用 file:// 打开时会被禁用）
+function storageAvailable() {
+  try {
+    const k = "__qt_probe__";
+    localStorage.setItem(k, "1");
+    localStorage.removeItem(k);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/* ---------- 排序（逻辑未改） ---------- */
+function sortTasks(list) {
+  return list.slice().sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    if (!a.done) {
+      if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+      if (a.dueDate) return -1;
+      if (b.dueDate) return 1;
+      return b.createdAt - a.createdAt;
+    }
+    return (b.completedAt || 0) - (a.completedAt || 0);
+  });
+}
+
+/* ---------- 渲染 ---------- */
+function render() {
+  renderHeader();
+  renderQuadrants();
+  renderDoneToggle();
+  if (currentView === "calendar") renderCalendar();
+  if (currentView === "stats") renderStats();
+}
+
+function renderHeader() {
+  const open = tasks.filter((t) => !t.done).length;
+  const doneToday = tasks.filter(isDoneToday).length;
+  const overdue = tasks.filter(isOverdue).length;
+
+  document.getElementById("statOpen").textContent = open;
+  document.getElementById("statDone").textContent = doneToday;
+  document.getElementById("statOverdue").textContent = overdue;
+
+  // 今日完成度 = 今日完成 /（今日完成 + 待办）
+  const denom = doneToday + open;
+  const pct = denom === 0 ? 0 : Math.round((doneToday / denom) * 100);
+
+  document.getElementById("ringText").textContent = pct + "%";
+
+  // 半圆仪表盘：mask 宽度从左向右展开
+  // 端点圆头各占 4px，可视范围约为 x=6 ~ x=94，故按 6 + 88 * pct 展开
+  const fill = document.getElementById("gaugeFill");
+  const w = pct === 0 ? 0 : 6 + 88 * (pct / 100);
+  fill.setAttribute("width", String(w));   // 保证兼容
+  fill.style.width = w + "px";             // 支持 CSS 过渡时才有动画
+
+  // 顶部日期
+  const now = new Date();
+  const WD = ["日", "一", "二", "三", "四", "五", "六"];
+  const MO = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  document.getElementById("todayLabel").textContent =
+    `${MO[now.getMonth()]} ${now.getDate()} · 星期${WD[now.getDay()]}`;
+}
+
+function renderQuadrants() {
+  const box = document.getElementById("quadrants");
+
+  box.innerHTML = QUADRANTS.map((q) => {
+    const all = tasks.filter((t) => quadOf(t) === q.key);
+    const openCount = all.filter((t) => !t.done).length;
+    const visible = all.filter((t) => (showDone ? true : !t.done));
+    const sorted = sortTasks(visible);
+
+    const body = sorted.length
+      ? `<div class="space-y-1.5">${sorted.map(taskHTML).join("")}</div>`
+      : `<p class="text-[12.5px] text-gray-600 px-2.5 py-3">${esc(q.empty)}</p>`;
+
+    return `
+      <section class="bg-ink rounded-2xl px-2.5 py-3">
+        <header class="flex items-center justify-between px-1.5 pb-2.5">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <svg class="w-[17px] h-[17px] shrink-0 ${q.accent}" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              ${QICON[q.key]}
+            </svg>
+            <h3 class="text-[14.5px] font-semibold tracking-tight truncate">${esc(q.name)}</h3>
+          </div>
+          <span class="text-[13px] font-bold tabular ${q.badge}">${openCount}</span>
+        </header>
+        ${body}
+      </section>
+    `;
+  }).join("");
+}
+
+function taskHTML(t) {
+  const over = isOverdue(t);
+  const titleCls = t.done ? "line-through text-gray-500" : "text-white";
+
+  // 副行：日期 / 逾期状态
+  const metaBits = [];
+  if (t.dueDate) {
+    metaBits.push(
+      over
+        ? `<span class="text-orange-500 font-medium">截止 ${esc(t.dueDate.slice(5))} · 已逾期</span>`
+        : `<span class="text-gray-500">截止 ${esc(t.dueDate.slice(5))}</span>`
+    );
+  } else if (t.done) {
+    metaBits.push('<span class="text-gray-600">已完成</span>');
+  }
+  const metaHtml = metaBits.length
+    ? `<p class="text-[11px] mt-1 tabular">${metaBits.join("")}</p>`
+    : "";
+
+  const noteHtml = t.note
+    ? `<p class="t-note text-[11.5px] text-gray-500 mt-1 leading-snug break-words">${esc(t.note)}</p>`
+    : "";
+
+  return `
+    <div class="task-row rise flex items-start gap-3 rounded-xl bg-ink2 px-3 py-2.5
+                ${t.done ? "opacity-60" : ""}" data-id="${t.id}">
+      <button data-act="toggle" aria-label="切换完成"
+              class="shrink-0 mt-[1px] w-[21px] h-[21px] rounded-full border-[1.5px]
+                     flex items-center justify-center transition-all duration-150
+                     ${t.done
+                       ? "bg-done border-done"
+                       : "border-[#48484A] active:border-gray-400"}">
+        ${t.done
+          ? `<svg class="w-[11px] h-[11px] text-black" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="3.4" stroke-linecap="round"
+                  stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>`
+          : ""}
+      </button>
+
+      <div data-act="expand" class="flex-1 min-w-0 py-[1px]">
+        <p class="t-title text-[14.5px] leading-tight truncate ${titleCls}">${esc(t.title)}</p>
+        ${metaHtml}
+        ${noteHtml}
+      </div>
+
+      <div class="shrink-0 flex items-center gap-0.5 -mr-1">
+        <button data-act="edit" aria-label="编辑"
+                class="w-7 h-7 rounded-lg flex items-center justify-center
+                       text-[#5A5A5E] active:text-gray-300 transition-colors">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>
+          </svg>
+        </button>
+        <button data-act="del" aria-label="删除"
+                class="w-7 h-7 rounded-lg flex items-center justify-center
+                       text-[#5A5A5E] active:text-orange-500 transition-colors">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h16M9 7V4.5h6V7M6.5 7l.8 12.2a1.6 1.6 0 0 0 1.6 1.5h6.2a1.6 1.6 0 0 0 1.6-1.5L17.5 7"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderDoneToggle() {
+  const track = document.getElementById("doneTrack");
+  const knob = document.getElementById("doneKnob");
+  const btn = document.getElementById("doneToggle");
+  btn.setAttribute("aria-pressed", String(showDone));
+  if (showDone) {
+    track.classList.add("bg-done");
+    track.classList.remove("bg-[#2C2C2E]");
+    knob.classList.add("translate-x-[16px]", "bg-white");
+    knob.classList.remove("bg-[#8E8E93]");
+  } else {
+    track.classList.remove("bg-done");
+    track.classList.add("bg-[#2C2C2E]");
+    knob.classList.remove("translate-x-[16px]", "bg-white");
+    knob.classList.add("bg-[#8E8E93]");
+  }
+}
+
+/* ---------- 视图切换 ---------- */
+function switchView(view) {
+  currentView = view;
+
+  document.querySelectorAll("[data-view]").forEach((el) => {
+    el.classList.toggle("hidden", el.dataset.view !== view);
+  });
+
+  // 顶部数据面板只在四象限页显示
+  const isHome = view === "quadrants";
+  document.getElementById("ringBox").classList.toggle("hidden", !isHome);
+  document.getElementById("headerStats").classList.toggle("hidden", !isHome);
+
+  document.getElementById("viewTitle").textContent =
+    view === "calendar" ? "日历" : view === "stats" ? "统计" : "四象限";
+
+  paintNav();
+
+  if (view === "calendar") renderCalendar();
+  if (view === "stats") renderStats();
+}
+
+function paintNav() {
+  document.querySelectorAll("[data-nav]").forEach((btn) => {
+    const on = btn.dataset.nav === currentView;
+    btn.classList.toggle("text-white", on);
+    btn.classList.toggle("text-[#4A4A4E]", !on);
+  });
+}
+
+/* ---------- 日历 ---------- */
+const pad2 = (n) => String(n).padStart(2, "0");
+
+const BAR_COLOR = {
+  Q1: "bg-orange-500",
+  Q2: "bg-green-500",
+  Q3: "bg-pink-500",
+  Q4: "bg-gray-500",
+};
+
+function renderCalendar() {
+  const y = calYear;
+  const m = calMonth;
+
+  document.getElementById("calTitle").textContent = `${y} 年 ${m + 1} 月`;
+
+  // 星期头（周一开头）
+  document.getElementById("calWeekdays").innerHTML = ["一", "二", "三", "四", "五", "六", "日"]
+    .map((d) => `<div class="text-center text-[10.5px] text-gray-600 font-medium py-1">${d}</div>`)
+    .join("");
+
+  // 按截止日期分组
+  const byDate = {};
+  tasks.forEach((t) => {
+    if (!t.dueDate) return;
+    (byDate[t.dueDate] = byDate[t.dueDate] || []).push(t);
+  });
+
+  const firstDow = (new Date(y, m, 1).getDay() + 6) % 7; // 周一 = 0
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const prevMonthDays = new Date(y, m, 0).getDate();
+
+  // 生成 7 列网格（不足一周的用上月/下月补位）
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) {
+    cells.push({ day: prevMonthDays - firstDow + 1 + i, other: true });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ day: d, other: false });
+  }
+  let nextDay = 1;
+  while (cells.length % 7 !== 0) {
+    cells.push({ day: nextDay++, other: true });
+  }
+
+  document.getElementById("calGrid").innerHTML = cells.map((c) => {
+    const ymd = c.other ? null : `${y}-${pad2(m + 1)}-${pad2(c.day)}`;
+    const dayTasks = ymd ? (byDate[ymd] || []) : [];
+    const openCount = dayTasks.filter((t) => !t.done).length;
+
+    const isToday = ymd === TODAY_SNAPSHOT;
+    const isSel = ymd === calSelected;
+    const isOverdueDay = !!ymd && ymd < TODAY_SNAPSHOT && openCount > 0;
+
+    // 主导象限色（未完成优先，按 Q1→Q4 取最靠前）
+    let dotCls = "";
+    if (dayTasks.length) {
+      const order = ["Q1", "Q2", "Q3", "Q4"];
+      const live = dayTasks.filter((t) => !t.done);
+      const pick = (live.length ? live : dayTasks)
+        .map((t) => quadOf(t))
+        .sort((a, b) => order.indexOf(a) - order.indexOf(b))[0];
+      dotCls = BAR_COLOR[pick];
+    }
+
+    const numCls = isSel
+      ? "text-black"
+      : c.other
+        ? "text-gray-700"
+        : isOverdueDay
+          ? "text-orange-500"
+          : "text-gray-300";
+
+    return `
+      <button class="h-10 rounded-lg flex flex-col items-center justify-center gap-1 press
+                     ${isSel ? "bg-white" : ""}
+                     ${isToday && !isSel ? "ring-1 ring-white/25" : ""}
+                     ${c.other ? "opacity-40" : ""}"
+              ${ymd ? `data-day="${ymd}"` : "disabled"}>
+        <span class="text-[12.5px] font-semibold tabular ${numCls}">${c.day}</span>
+        <span class="w-1 h-1 rounded-full ${dotCls || "bg-transparent"}"></span>
+      </button>
+    `;
+  }).join("");
+
+  // 选中日期的任务
+  const selTasks = sortTasks(byDate[calSelected] || []);
+  const parts = calSelected.split("-");
+
+  document.getElementById("calDayTitle").textContent =
+    `${Number(parts[1])} 月 ${Number(parts[2])} 日 · ${selTasks.length} 项`;
+
+  document.getElementById("calTasks").innerHTML = selTasks.length
+    ? selTasks.map(taskHTML).join("")
+    : `<p class="text-[12.5px] text-gray-600 py-5 text-center">这天没有安排任务</p>`;
+}
+
+/* ---------- 统计 ---------- */
+function renderStats() {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dow = (now.getDay() + 6) % 7;              // 周一 = 0
+  const mondayTs = startOfToday - dow * 86400000;
+
+  const doneList = tasks.filter((t) => t.done && t.completedAt);
+  const weekDone = doneList.filter((t) => t.completedAt >= mondayTs).length;
+  const totalDone = doneList.length;
+
+  // 近 7 天
+  const WD = ["一", "二", "三", "四", "五", "六", "日"];
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d0 = startOfToday - i * 86400000;
+    const d1 = d0 + 86400000;
+    const count = doneList.filter((t) => t.completedAt >= d0 && t.completedAt < d1).length;
+    const dt = new Date(d0);
+    days.push({ label: WD[(dt.getDay() + 6) % 7], count, today: i === 0 });
+  }
+  const maxDay = Math.max(1, ...days.map((d) => d.count));
+
+  // 待办分布
+  const openTasks = tasks.filter((t) => !t.done);
+  const dist = QUADRANTS.map((q) => ({
+    key: q.key,
+    name: q.name,
+    accent: q.accent,
+    n: openTasks.filter((t) => quadOf(t) === q.key).length,
+  }));
+  const maxDist = Math.max(1, ...dist.map((d) => d.n));
+
+  // 连续完成天数
+  let streakN = 0;
+  for (let i = 0; i < 400; i++) {
+    const d0 = startOfToday - i * 86400000;
+    const d1 = d0 + 86400000;
+    if (doneList.some((t) => t.completedAt >= d0 && t.completedAt < d1)) streakN++;
+    else break;
+  }
+
+  const barsHtml = days.map((d) => `
+    <div class="flex-1 flex flex-col items-center gap-2">
+      <div class="h-[84px] w-full flex items-end">
+        <div class="w-full rounded-[3px] ${d.today ? "bg-accent" : "bg-[#3A3A3C]"} transition-all duration-500"
+             style="height:${d.count === 0 ? 2 : Math.max(7, (d.count / maxDay) * 100)}%"></div>
+      </div>
+      <span class="text-[10px] tabular ${d.today ? "text-white font-semibold" : "text-gray-600"}">${d.label}</span>
+    </div>
+  `).join("");
+
+  const distHtml = dist.map((d) => `
+    <div class="flex items-center gap-3 py-1.5">
+      <span class="w-[76px] shrink-0 text-[12px] ${d.accent}">${esc(d.name)}</span>
+      <div class="flex-1 h-[5px] rounded-full bg-[#2C2C2E] overflow-hidden">
+        <div class="h-full rounded-full ${BAR_COLOR[d.key]} transition-all duration-500"
+             style="width:${(d.n / maxDist) * 100}%"></div>
+      </div>
+      <span class="w-5 text-right text-[12px] font-bold tabular text-gray-300">${d.n}</span>
+    </div>
+  `).join("");
+
+  document.getElementById("statsBody").innerHTML = `
+    <!-- 本周完成 -->
+    <div class="bg-ink rounded-2xl px-5 py-5">
+      <p class="text-[11px] text-gray-500 font-medium">本周完成</p>
+      <div class="flex items-baseline gap-2 mt-2">
+        <span class="text-[40px] leading-none font-bold tabular">${weekDone}</span>
+        <span class="text-[12px] text-gray-500">项</span>
+      </div>
+      <p class="text-[11.5px] text-gray-500 mt-2.5">
+        累计 ${totalDone} 项 · 连续 ${streakN} 天
+      </p>
+    </div>
+
+    <!-- 近 7 天 -->
+    <div class="bg-ink rounded-2xl px-4 py-4 mt-3">
+      <p class="text-[12px] text-gray-400 font-medium mb-3 px-1">近 7 天完成</p>
+      <div class="flex items-end gap-1.5 px-1">${barsHtml}</div>
+    </div>
+
+    <!-- 待办分布 -->
+    <div class="bg-ink rounded-2xl px-4 py-4 mt-3">
+      <p class="text-[12px] text-gray-400 font-medium mb-2 px-1">待办分布</p>
+      ${openTasks.length ? distHtml
+        : '<p class="text-[12.5px] text-gray-600 px-1 py-2">全部清空了，厉害</p>'}
+    </div>
+  `;
+}
+
+/* ---------- Toast ---------- */
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 1900);
+}
+
+/* ---------- 事件委托：所有任务行（列表页与日历页共用） ---------- */
+document.addEventListener("click", (e) => {
+  // 日历：点日期格子
+  const dayBtn = e.target.closest("[data-day]");
+  if (dayBtn) {
+    calSelected = dayBtn.dataset.day;
+    renderCalendar();
+    return;
+  }
+
+  const actEl = e.target.closest("[data-act]");
+  if (!actEl) return;
+
+  const row = e.target.closest(".task-row");
+  if (!row) return;
+
+  const task = tasks.find((t) => t.id === row.dataset.id);
+  if (!task) return;
+
+  const act = actEl.dataset.act;
+
+  if (act === "toggle") {
+    task.done = !task.done;
+    task.completedAt = task.done ? Date.now() : null;
+    save();
+    render();
+    return;
+  }
+
+  if (act === "expand") {
+    if (task.note) row.classList.toggle("expanded");
+    return;
+  }
+
+  if (act === "edit") {
+    openSheet("edit", task.id);
+    return;
+  }
+
+  if (act === "del") {
+    if (confirm("确定删除这条任务吗？")) {
+      tasks = tasks.filter((t) => t.id !== task.id);
+      save();
+      render();
+    }
+    return;
+  }
+});
+
+/* ---------- 显示已完成 ---------- */
+document.getElementById("doneToggle").addEventListener("click", () => {
+  showDone = !showDone;
+  renderDoneToggle();
+  renderQuadrants();
+});
+
+/* ---------- 底部面板 ---------- */
+const modal = document.getElementById("modal");
+
+function openSheet(mode, id) {
+  sheetMode = mode;
+  editingId = id || null;
+
+  const isEdit = mode === "edit";
+  document.getElementById("sheetTitle").textContent = isEdit ? "编辑任务" : "新建任务";
+  document.getElementById("sheetHint").textContent = "";
+
+  if (isEdit) {
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    document.getElementById("fTitle").value = t.title;
+    document.getElementById("fNote").value = t.note;
+    document.getElementById("fDue").value = t.dueDate || "";
+    flagImp = t.important;
+    flagUrg = t.urgent;
+  } else {
+    document.getElementById("fTitle").value = "";
+    document.getElementById("fNote").value = "";
+    document.getElementById("fDue").value = "";
+    flagImp = false;
+    flagUrg = false;
+  }
+
+  paintFlags();
+  modal.classList.add("open");
+
+  if (!isEdit) {
+    setTimeout(() => document.getElementById("fTitle").focus(), 340);
+  }
+}
+
+function closeSheet() {
+  modal.classList.remove("open");
+  editingId = null;
+}
+
+function paintFlags() {
+  const imp = document.getElementById("fImp");
+  const urg = document.getElementById("fUrg");
+
+  imp.className = "h-11 rounded-xl text-[13.5px] font-semibold transition-colors duration-150 " +
+    (flagImp ? "bg-accent text-black" : "bg-ink2 text-gray-400");
+  urg.className = "h-11 rounded-xl text-[13.5px] font-semibold transition-colors duration-150 " +
+    (flagUrg ? "bg-accent text-black" : "bg-ink2 text-gray-400");
+}
+
+document.getElementById("fImp").addEventListener("click", () => {
+  flagImp = !flagImp; paintFlags();
+});
+document.getElementById("fUrg").addEventListener("click", () => {
+  flagUrg = !flagUrg; paintFlags();
+});
+
+document.getElementById("openAdd").addEventListener("click", () => openSheet("add"));
+document.getElementById("sheetCancel").addEventListener("click", closeSheet);
+document.getElementById("scrim").addEventListener("click", closeSheet);
+
+// Esc 关闭
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && modal.classList.contains("open")) closeSheet();
+});
+
+/* ---------- 保存 ---------- */
+document.getElementById("sheetSave").addEventListener("click", () => {
+  const titleEl = document.getElementById("fTitle");
+  const hint = document.getElementById("sheetHint");
+  const title = titleEl.value.trim();
+
+  if (!title) {
+    hint.textContent = "标题不能为空";
+    titleEl.focus();
+    return;
+  }
+  if (title.length > 60) {
+    hint.textContent = "标题最多 60 字";
+    return;
+  }
+
+  const note = document.getElementById("fNote").value.trim().slice(0, 200);
+  const dueDate = document.getElementById("fDue").value || "";
+  const wasEdit = sheetMode === "edit";
+
+  if (wasEdit) {
+    const t = tasks.find((x) => x.id === editingId);
+    if (!t) { closeSheet(); return; }
+    t.title = title;
+    t.note = note;
+    t.dueDate = dueDate;
+    t.important = flagImp;
+    t.urgent = flagUrg;
+  } else {
+    tasks.push({
+      id: genId(),
+      title,
+      note,
+      important: flagImp,
+      urgent: flagUrg,
+      done: false,
+      dueDate,
+      createdAt: Date.now(),
+      completedAt: null,
+    });
+  }
+
+  save();
+  render();
+  closeSheet();
+  toast(wasEdit ? "已保存" : "已添加");
+});
+
+/* ---------- 底部导航 ---------- */
+document.querySelectorAll("[data-nav]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const name = btn.dataset.nav;
+    if (name === currentView) return;
+    switchView(name);
+  });
+});
+
+/* ---------- 日历翻月 ---------- */
+function syncSelectedToMonth() {
+  const prefix = `${calYear}-${pad2(calMonth + 1)}`;
+  if (!calSelected.startsWith(prefix)) calSelected = `${prefix}-01`;
+}
+
+document.getElementById("calPrev").addEventListener("click", () => {
+  calMonth--;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
+  syncSelectedToMonth();
+  renderCalendar();
+});
+
+document.getElementById("calNext").addEventListener("click", () => {
+  calMonth++;
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  syncSelectedToMonth();
+  renderCalendar();
+});
+
+/* ---------- 启动 ---------- */
+const canStore = storageAvailable();
+
+load();
+render();
+paintNav();
+
+// 存不了数据就明说，别让用户以为存上了
+if (!canStore) {
+  setTimeout(() => toast("当前打开方式无法保存数据"), 900);
+}
+
+/* ---------- 注册 Service Worker（PWA 安装 + 离线） ---------- */
+// 注意：只有 https 或 localhost 才能注册，file:// 打开会自动跳过
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {
+      /* 注册失败不影响正常使用 */
+    });
+  });
+}
+</script>
+
+</body>
+</html>
