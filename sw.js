@@ -3,7 +3,7 @@
  * 作用：让页面能被安装成 APP，并在断网时仍可打开
  * ========================================================= */
 
-const CACHE = "quadrant-v1";
+const CACHE = "quadrant-v2";
 
 // 首次安装时预缓存核心文件
 const PRECACHE = [
