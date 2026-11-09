@@ -219,6 +219,9 @@
       <h3 id="calDayTitle" class="text-[13px] font-semibold text-gray-400 mb-3"></h3>
       <div id="calTasks" class="space-y-2"></div>
     </div>
+
+    <!-- 当日小结（回顾用） -->
+    <div id="calSummary" class="mt-5"></div>
   </section>
 
   <!-- ---------- 统计视图 ---------- -->
@@ -844,6 +847,49 @@ function renderCalendar() {
   document.getElementById("calTasks").innerHTML = selTasks.length
     ? selTasks.map(taskHTML).join("")
     : `<p class="text-[12.5px] text-gray-600 py-5 text-center">这天没有安排任务</p>`;
+
+  // 顺带回顾这天的小结
+  renderCalSummary(calSelected);
+}
+
+/* 静态星星（只读，用于日历回顾） */
+function starsStatic(n) {
+  return [1, 2, 3, 4, 5].map((i) => {
+    const on = i <= n;
+    return `<svg class="w-[13px] h-[13px] ${on ? "text-accent" : "text-[#3A3A3C]"}"
+                 viewBox="0 0 24 24" fill="${on ? "currentColor" : "none"}"
+                 stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+              <path d="${STAR_PATH}" />
+            </svg>`;
+  }).join("");
+}
+
+/* 日历里回顾某天的小结 */
+function renderCalSummary(ymd) {
+  const box = document.getElementById("calSummary");
+  const rec = readSummaries()[ymd];
+
+  if (!rec || (!rec.note && !rec.stars)) {
+    box.innerHTML = `
+      <div class="bg-ink rounded-2xl px-4 py-4">
+        <p class="text-[12px] text-gray-400 font-medium mb-2 px-1">当日小结</p>
+        <p class="text-[12.5px] text-gray-600 px-1">这天没有写小结</p>
+      </div>`;
+    return;
+  }
+
+  const noteHtml = rec.note
+    ? `<p class="text-[13px] text-gray-300 leading-relaxed px-1 whitespace-pre-wrap break-words">${esc(rec.note)}</p>`
+    : `<p class="text-[12.5px] text-gray-600 px-1">只打了分，没写字</p>`;
+
+  box.innerHTML = `
+    <div class="bg-ink rounded-2xl px-4 py-4">
+      <div class="flex items-center justify-between mb-2.5 px-1">
+        <p class="text-[12px] text-gray-400 font-medium">当日小结</p>
+        <div class="flex items-center gap-0.5">${starsStatic(rec.stars || 0)}</div>
+      </div>
+      ${noteHtml}
+    </div>`;
 }
 
 /* ---------- 统计 ---------- */
