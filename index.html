@@ -225,6 +225,54 @@
   <section data-view="stats" class="mt-8 hidden">
     <div id="statsBody"></div>
   </section>
+
+  <!-- ---------- 每日小结视图 ---------- -->
+  <section data-view="summary" class="mt-8 hidden pb-10">
+    <!-- 顶部数据 -->
+    <div class="bg-ink rounded-2xl px-5 py-5">
+      <div class="flex justify-center items-start gap-16">
+        <div class="text-center">
+          <span id="sumDone"
+                class="block text-[40px] leading-none font-bold tabular tracking-tight text-purple-500">0</span>
+          <p class="text-[11px] text-gray-500 mt-2.5 font-medium">已完成</p>
+        </div>
+        <div class="text-center">
+          <span id="sumOpen"
+                class="block text-[40px] leading-none font-bold tabular tracking-tight text-orange-500">0</span>
+          <p class="text-[11px] text-gray-500 mt-2.5 font-medium">未完成</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 今日已完成 -->
+    <div class="mt-6">
+      <p class="text-[12px] text-gray-400 font-medium mb-3 px-1">今日完成</p>
+      <div id="sumDoneList" class="flex flex-wrap gap-2"></div>
+    </div>
+
+    <!-- 效率评分 -->
+    <div class="mt-6">
+      <p class="text-[12px] text-gray-400 font-medium mb-1 px-1">今日效率</p>
+      <div id="starRow" class="flex items-center justify-center gap-1 py-2"></div>
+    </div>
+
+    <!-- 今日复盘 -->
+    <div class="mt-4">
+      <p class="text-[12px] text-gray-400 font-medium mb-3 px-1">今日复盘</p>
+      <textarea id="sumNote" rows="7" placeholder="写点什么记录今天..."
+                class="w-full bg-ink2 rounded-2xl px-4 py-4 text-[14px] leading-relaxed text-white
+                       placeholder:text-gray-600 border-0 outline-none resize-none
+                       focus:ring-1 focus:ring-accent/40 transition"></textarea>
+    </div>
+
+    <!-- 保存 -->
+    <button id="sumSave"
+            class="w-full h-12 rounded-xl bg-accent text-black text-[15px] font-semibold press mt-4">
+      保存小结
+    </button>
+
+    <p id="sumSavedAt" class="text-[11px] text-gray-600 text-center mt-3 min-h-[16px]"></p>
+  </section>
 </main>
 
 <!-- ============ 悬浮添加按钮 ============ -->
@@ -242,7 +290,7 @@
 <!-- ============ 底部导航 ============ -->
 <nav class="fixed bottom-0 inset-x-0 z-30">
   <div class="bg-black/[0.85] backdrop-blur-xl border-t border-white/[0.06]">
-    <div class="max-w-lg mx-auto grid grid-cols-3 h-[58px]"
+    <div class="max-w-lg mx-auto grid grid-cols-4 h-[58px]"
          style="padding-bottom: env(safe-area-inset-bottom);">
 
       <!-- 四象限（当前） -->
@@ -274,6 +322,16 @@
           <path d="M6 20v-5M12 20V6M18 20v-9" />
         </svg>
         <span class="text-[10px] font-medium">统计</span>
+      </button>
+
+      <!-- 每日小结 -->
+      <button class="flex flex-col items-center justify-center gap-1.5 text-[#4A4A4E]" data-nav="summary">
+        <svg class="w-[21px] h-[21px]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="3.5" width="14" height="17" rx="2.2" />
+          <path d="M9 8.5h6M9 12h6M9 15.5h3.5" />
+        </svg>
+        <span class="text-[10px] font-medium">小结</span>
       </button>
     </div>
   </div>
@@ -356,6 +414,7 @@
 
 /* ---------- 常量 ---------- */
 const STORAGE_KEY = "quadrant_todo_v1";
+const SUMMARY_KEY = "quadrant_summary_v1";   // 每日小结：{ "YYYY-MM-DD": { note, stars, savedAt } }
 
 const QUADRANTS = [
   { key: "Q1", name: "重要且紧急", sub: "立即去做",
@@ -394,6 +453,11 @@ let sheetMode = "add";   // add | edit
 let editingId = null;
 let flagImp = false;     // 面板内的临时状态
 let flagUrg = false;
+
+// 每日小结状态
+let summaryStars = 0;        // 0~5
+let summaryDirty = false;    // 是否有未保存的改动
+let summaryLoadedDate = "";  // 当前文本框里装的是哪一天的数据
 
 // 视图状态
 let currentView = "quadrants";        // quadrants | calendar | stats
@@ -648,6 +712,11 @@ function renderDoneToggle() {
 
 /* ---------- 视图切换 ---------- */
 function switchView(view) {
+  // 离开小结页前，若有未保存的内容先静默存下来，别让用户白写
+  if (currentView === "summary" && view !== "summary" && summaryDirty) {
+    persistSummary(true);
+  }
+
   currentView = view;
 
   document.querySelectorAll("[data-view]").forEach((el) => {
@@ -660,12 +729,16 @@ function switchView(view) {
   document.getElementById("headerStats").classList.toggle("hidden", !isHome);
 
   document.getElementById("viewTitle").textContent =
-    view === "calendar" ? "日历" : view === "stats" ? "统计" : "四象限";
+    view === "calendar" ? "日历"
+      : view === "stats" ? "统计"
+        : view === "summary" ? "小结"
+          : "四象限";
 
   paintNav();
 
   if (view === "calendar") renderCalendar();
   if (view === "stats") renderStats();
+  if (view === "summary") renderSummary();
 }
 
 function paintNav() {
@@ -864,6 +937,111 @@ function renderStats() {
   `;
 }
 
+/* ---------- 每日小结 ---------- */
+const STAR_PATH = "M12 2.8l2.85 5.78 6.38.93-4.62 4.5 1.09 6.35L12 17.36l-5.7 3 1.09-6.35-4.62-4.5 6.38-.93z";
+
+// 读取全部小结：{ "YYYY-MM-DD": { note, stars, savedAt } }
+function readSummaries() {
+  try {
+    const raw = localStorage.getItem(SUMMARY_KEY);
+    const data = raw ? JSON.parse(raw) : {};
+    return data && typeof data === "object" ? data : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function renderStars() {
+  const box = document.getElementById("starRow");
+  box.innerHTML = [1, 2, 3, 4, 5].map((i) => {
+    const on = i <= summaryStars;
+    return `
+      <button data-star="${i}" aria-label="${i} 星"
+              class="w-11 h-11 flex items-center justify-center press">
+        <svg class="w-[26px] h-[26px] transition-all duration-200 ${on ? "text-accent" : "text-[#3A3A3C]"}"
+             viewBox="0 0 24 24" fill="${on ? "currentColor" : "none"}"
+             stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="${STAR_PATH}" />
+        </svg>
+      </button>
+    `;
+  }).join("");
+}
+
+// 加载当天的小结
+function loadSummary() {
+  const today = readSummaries()[TODAY_SNAPSHOT] || {};
+
+  summaryStars = Number(today.stars) || 0;
+  document.getElementById("sumNote").value = today.note || "";
+  summaryDirty = false;
+  summaryLoadedDate = TODAY_SNAPSHOT;
+
+  renderStars();
+
+  const at = document.getElementById("sumSavedAt");
+  if (today.savedAt) {
+    const d = new Date(today.savedAt);
+    const p = (n) => String(n).padStart(2, "0");
+    at.textContent =
+      `上次保存 ${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } else {
+    at.textContent = "";
+  }
+}
+
+function renderSummary() {
+  const doneToday = tasks.filter(isDoneToday);
+  const open = tasks.filter((t) => !t.done).length;
+
+  document.getElementById("sumDone").textContent = doneToday.length;
+  document.getElementById("sumOpen").textContent = open;
+
+  // 今日完成标签
+  const box = document.getElementById("sumDoneList");
+  box.innerHTML = doneToday.length
+    ? doneToday.map((t) => `
+        <span class="px-3 py-1.5 rounded-lg bg-ink2 text-[12px] text-gray-300 leading-none">
+          ${esc(t.title)}
+        </span>`).join("")
+    : `<p class="text-[12.5px] text-gray-600 px-1 py-2">今天还没有完成的任务</p>`;
+
+  // 跨天时才重新加载，避免冲掉正在写的内容
+  if (summaryLoadedDate !== TODAY_SNAPSHOT) {
+    loadSummary();
+  } else {
+    renderStars();
+  }
+}
+
+// 写入当天小结。silent=true 时不弹提示（用于自动保存）
+function persistSummary(silent) {
+  const all = readSummaries();
+  all[TODAY_SNAPSHOT] = {
+    note: document.getElementById("sumNote").value,
+    stars: summaryStars,
+    savedAt: Date.now(),
+  };
+
+  let ok = true;
+  try {
+    localStorage.setItem(SUMMARY_KEY, JSON.stringify(all));
+  } catch (e) {
+    ok = false;   // 隐私模式或配额满
+  }
+
+  if (ok) summaryDirty = false;
+
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const at = document.getElementById("sumSavedAt");
+  at.textContent = ok
+    ? `已保存 ${p(d.getHours())}:${p(d.getMinutes())}`
+    : "保存失败：这个环境不允许写入本地数据";
+
+  if (!silent) toast(ok ? "小结已保存" : "保存失败，没能写入");
+}
+
 /* ---------- Toast ---------- */
 let toastTimer = null;
 function toast(msg) {
@@ -881,6 +1059,15 @@ document.addEventListener("click", (e) => {
   if (dayBtn) {
     calSelected = dayBtn.dataset.day;
     renderCalendar();
+    return;
+  }
+
+  // 小结：点星星打分
+  const starBtn = e.target.closest("[data-star]");
+  if (starBtn) {
+    summaryStars = Number(starBtn.dataset.star);
+    summaryDirty = true;
+    renderStars();
     return;
   }
 
@@ -928,6 +1115,26 @@ document.getElementById("doneToggle").addEventListener("click", () => {
   showDone = !showDone;
   renderDoneToggle();
   renderQuadrants();
+});
+
+/* ---------- 每日小结：输入与保存 ---------- */
+document.getElementById("sumSave").addEventListener("click", () => persistSummary(false));
+
+// 打了字或改了分数，标记为「有未保存内容」
+document.getElementById("sumNote").addEventListener("input", () => {
+  summaryDirty = true;
+});
+
+// 呼出键盘时把输入框滚到可见区域，避免被挡住
+document.getElementById("sumNote").addEventListener("focus", (e) => {
+  const el = e.target;
+  setTimeout(() => {
+    try {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    } catch (err) {
+      el.scrollIntoView();
+    }
+  }, 320);
 });
 
 /* ---------- 底部面板 ---------- */
